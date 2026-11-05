@@ -36,7 +36,7 @@ jobs:
           else
             echo "env=dev" >> $GITHUB_OUTPUT
             echo "tfvars=environments/dev.tfvars" >> $GITHUB_OUTPUT
-            echo "state_bucket=building-analytics-tfstate-dev-513719" >> $GITHUB_OUTPUT
+            echo "state_bucket=building-analytics-tfstate-dev" >> $GITHUB_OUTPUT
             echo "state_prefix=terraform/state/dev" >> $GITHUB_OUTPUT
             echo "wif_provider=projects/880396886857/locations/global/workloadIdentityPools/github-pool-dev/providers/github-provider" >> $GITHUB_OUTPUT
             echo "sa=terraform-dev-sa@building-analytics-dev-513719.iam.gserviceaccount.com" >> $GITHUB_OUTPUT
