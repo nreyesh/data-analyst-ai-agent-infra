@@ -4,8 +4,8 @@
 resource "google_artifact_registry_repository" "docker_repo" {
   project       = var.project_id
   location      = var.region
-  repository_id = "agent-containers-${var.environment}"
-  description   = "Docker repository for backend services (${var.environment})"
+  repository_id = "building-analytics-repo-${var.environment}"
+  description   = "Docker repository for Building Analytics services (${var.environment})"
   format        = "DOCKER"
 }
 
@@ -63,7 +63,7 @@ resource "google_compute_subnetwork" "subnet" {
 
 # Allocate a private IP range for Google managed services (Cloud SQL)
 resource "google_compute_global_address" "private_ip_alloc" {
-  name          = "private-ip-alloc-${var.environment}"
+  name          = "building-analytics-ip-alloc-${var.environment}"
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
   prefix_length = 16
@@ -81,12 +81,13 @@ resource "google_service_networking_connection" "private_vpc_connection" {
 # ==============================================================================
 # 5. Cloud SQL (PostgreSQL Instance with 100% Private IP - No Public IPv4)
 # ==============================================================================
-resource "random_id" "db_suffix" {
+resource "random_id" "db_suffix_v2" {
   byte_length = 4
 }
 
+# The Cloud SQL Server Instance (Compute, RAM, Storage, and IP)
 resource "google_sql_database_instance" "postgres" {
-  name                = "postgres-${var.environment}-${random_id.db_suffix.hex}"
+  name                = "building-analytics-instance-${var.environment}-${random_id.db_suffix_v2.hex}"
   project             = var.project_id
   region              = var.region
   database_version    = "POSTGRES_15"
@@ -112,8 +113,9 @@ resource "google_sql_database_instance" "postgres" {
   }
 }
 
+# The Logical PostgreSQL Database (Where tables and schemas live)
 resource "google_sql_database" "app_db" {
-  name     = "app_database_${var.environment}"
+  name     = "building_analytics_db_${var.environment}"
   instance = google_sql_database_instance.postgres.name
   project  = var.project_id
 }
@@ -160,7 +162,7 @@ resource "google_secret_manager_secret_iam_member" "secret_accessor" {
 # 7. Cloud Run Service (Private Backend with Direct VPC Egress)
 # ==============================================================================
 resource "google_cloud_run_v2_service" "backend" {
-  name     = "backend-service-${var.environment}"
+  name     = "building-analytics-backend-${var.environment}"
   location = var.region
   project  = var.project_id
 
