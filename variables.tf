@@ -13,3 +13,9 @@ variable "environment" {
   description = "Environment name (dev, prod)"
   type        = string
 }
+
+variable "db_tier" {
+  description = "Cloud SQL machine tier"
+  type        = string
+  default     = "db-f1-micro"
+}
