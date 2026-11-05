@@ -1,0 +1,74 @@
+name: "Terraform CI/CD"
+
+on:
+  pull_request:
+    branches: [ "dev", "main" ]
+  push:
+    branches: [ "dev", "main" ]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform:
+    name: "Terraform Plan & Apply"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. Determine environment with STRICT isolation between dev and prod
+      - name: Set Environment Context
+        id: set_env
+        run: |
+          TARGET_BRANCH="${{ github.base_ref || github.ref_name }}"
+          echo "Target branch: ${TARGET_BRANCH}"
+
+          if [ "${TARGET_BRANCH}" = "main" ]; then
+            echo "env=prod" >> $GITHUB_OUTPUT
+            echo "tfvars=environments/prod.tfvars" >> $GITHUB_OUTPUT
+            echo "state_bucket=building-analytics-tfstate-prod" >> $GITHUB_OUTPUT
+            echo "state_prefix=terraform/state/prod" >> $GITHUB_OUTPUT
+            echo "wif_provider=projects/PROD_PROJECT_NUMBER/locations/global/workloadIdentityPools/github-pool-prod/providers/github-provider" >> $GITHUB_OUTPUT
+            echo "sa=terraform-prod-sa@building-analytics-prod.iam.gserviceaccount.com" >> $GITHUB_OUTPUT
+          else
+            echo "env=dev" >> $GITHUB_OUTPUT
+            echo "tfvars=environments/dev.tfvars" >> $GITHUB_OUTPUT
+            echo "state_bucket=building-analytics-tfstate-dev-513719" >> $GITHUB_OUTPUT
+            echo "state_prefix=terraform/state/dev" >> $GITHUB_OUTPUT
+            echo "wif_provider=projects/880396886857/locations/global/workloadIdentityPools/github-pool-dev/providers/github-provider" >> $GITHUB_OUTPUT
+            echo "sa=terraform-dev-sa@building-analytics-dev-513719.iam.gserviceaccount.com" >> $GITHUB_OUTPUT
+          fi
+
+      # 2. Authenticate to Google Cloud using Environment-Specific Workload Identity
+      - name: Google Cloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ steps.set_env.outputs.wif_provider }}
+          service_account: ${{ steps.set_env.outputs.sa }}
+
+      # 3. Setup Terraform CLI
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.0
+
+      # 4. Terraform Init (Dynamically binds to the environment's isolated bucket and prefix)
+      - name: Terraform Init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ steps.set_env.outputs.state_bucket }}" \
+            -backend-config="prefix=${{ steps.set_env.outputs.state_prefix }}"
+
+      # 5. Terraform Plan (Evaluates the isolated environment tfvars)
+      - name: Terraform Plan
+        run: |
+          terraform plan -input=false -var-file="${{ steps.set_env.outputs.tfvars }}"
+
+      # 6. Terraform Apply (Runs automatically on pushes/merges to dev or main)
+      - name: Terraform Apply
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+        run: |
+          terraform apply -auto-approve -input=false -var-file="${{ steps.set_env.outputs.tfvars }}"
