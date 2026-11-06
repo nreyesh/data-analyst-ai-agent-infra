@@ -21,7 +21,7 @@ resource "google_storage_bucket" "app_data" {
 }
 
 # ==============================================================================
-# 3. Secret Manager: Database Password Generation & Secure Storage
+# 3. Secret Manager: Passwords & Cryptographic Signing Keys
 # ==============================================================================
 resource "random_password" "db_password" {
   length           = 24
@@ -41,6 +41,26 @@ resource "google_secret_manager_secret" "db_password_secret" {
 resource "google_secret_manager_secret_version" "db_password_val" {
   secret      = google_secret_manager_secret.db_password_secret.id
   secret_data = random_password.db_password.result
+}
+
+# Chainlit Session Auth Secret (Cryptographic signing key for frontend user sessions)
+resource "random_password" "chainlit_secret" {
+  length  = 32
+  special = false
+}
+
+resource "google_secret_manager_secret" "chainlit_secret" {
+  secret_id = "building-analytics-chainlit-secret-${var.environment}"
+  project   = var.project_id
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "chainlit_secret_val" {
+  secret      = google_secret_manager_secret.chainlit_secret.id
+  secret_data = random_password.chainlit_secret.result
 }
 
 # ==============================================================================
@@ -150,9 +170,16 @@ resource "google_storage_bucket_iam_member" "data_user" {
   member = "serviceAccount:${google_service_account.app_runner.email}"
 }
 
-# Grant Cloud Run permission to read the DB password secret
+# Grant Cloud Run permission to read secrets (DB password and Chainlit auth secret)
 resource "google_secret_manager_secret_iam_member" "secret_accessor" {
   secret_id = google_secret_manager_secret.db_password_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.app_runner.email}"
+  project   = var.project_id
+}
+
+resource "google_secret_manager_secret_iam_member" "chainlit_secret_accessor" {
+  secret_id = google_secret_manager_secret.chainlit_secret.id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.app_runner.email}"
   project   = var.project_id
@@ -267,6 +294,17 @@ resource "google_cloud_run_v2_service" "frontend" {
       env {
         name  = "BACKEND_URL"
         value = google_cloud_run_v2_service.backend.uri
+      }
+
+      # Inject Chainlit Auth Secret directly from Secret Manager at runtime
+      env {
+        name = "CHAINLIT_AUTH_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.chainlit_secret.secret_id
+            version = "latest"
+          }
+        }
       }
     }
   }
