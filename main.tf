@@ -1,5 +1,5 @@
 # ==============================================================================
-# 1. Artifact Registry (Docker images for backend)
+# 1. Artifact Registry (Docker images for backend & frontend)
 # ==============================================================================
 resource "google_artifact_registry_repository" "docker_repo" {
   project       = var.project_id
@@ -159,20 +159,20 @@ resource "google_secret_manager_secret_iam_member" "secret_accessor" {
 }
 
 # ==============================================================================
-# 7. Cloud Run Service (Private Backend with Direct VPC Egress)
+# 7. Cloud Run Service 1: Private Backend (Direct VPC Egress to Cloud SQL)
 # ==============================================================================
 resource "google_cloud_run_v2_service" "backend" {
   name     = "building-analytics-backend-${var.environment}"
   location = var.region
   project  = var.project_id
 
-  # Ingress restricted to internal / load balancing only (via Firebase Hosting)
+  # Ingress restricted to internal / load balancing only (via Frontend or Firebase)
   ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
   template {
     service_account = google_service_account.app_runner.email
 
-    # Direct VPC Egress: Routes private traffic directly into the subnet (No connector fees!)
+    # Direct VPC Egress: Routes private traffic directly into the subnet
     vpc_access {
       network_interfaces {
         network    = google_compute_network.vpc.id
@@ -224,4 +224,59 @@ resource "google_cloud_run_v2_service" "backend" {
       }
     }
   }
+}
+
+# ==============================================================================
+# 8. Cloud Run Service 2: Public Frontend (Chat UI / Chainlit)
+# ==============================================================================
+resource "google_cloud_run_v2_service" "frontend" {
+  name     = "building-analytics-front-${var.environment}"
+  location = var.region
+  project  = var.project_id
+
+  # Public Ingress so users can access the chat UI in their browser
+  ingress = "INGRESS_TRAFFIC_ALL"
+
+  template {
+    service_account = google_service_account.app_runner.email
+
+    # Direct VPC Egress: Allows the frontend to call the private backend over the VPC
+    vpc_access {
+      network_interfaces {
+        network    = google_compute_network.vpc.id
+        subnetwork = google_compute_subnetwork.subnet.id
+      }
+      egress = "PRIVATE_RANGES_ONLY"
+    }
+
+    containers {
+      # Placeholder image until the frontend CI/CD pipeline deploys the real Chainlit container
+      image = "us-docker.pkg.dev/cloudrun/container/hello"
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
+
+      env {
+        name  = "ENVIRONMENT"
+        value = var.environment
+      }
+      env {
+        name  = "BACKEND_URL"
+        value = google_cloud_run_v2_service.backend.uri
+      }
+    }
+  }
+}
+
+# Allow public unauthenticated web access to the frontend chat UI
+resource "google_cloud_run_v2_service_iam_member" "frontend_public_access" {
+  project  = var.project_id
+  location = google_cloud_run_v2_service.frontend.location
+  name     = google_cloud_run_v2_service.frontend.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
