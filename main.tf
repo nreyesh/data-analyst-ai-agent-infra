@@ -306,6 +306,17 @@ resource "google_cloud_run_v2_service" "frontend" {
           }
         }
       }
+
+      # Inject Firebase Web API Key for frontend user credential verification
+      env {
+        name = "FIREBASE_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.firebase_api_key.secret_id
+            version = "latest"
+          }
+        }
+      }
     }
   }
 }
