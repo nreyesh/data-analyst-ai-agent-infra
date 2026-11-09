@@ -86,3 +86,11 @@ resource "google_secret_manager_secret_version" "firebase_api_key_val" {
   secret      = google_secret_manager_secret.firebase_api_key.id
   secret_data = data.google_firebase_web_app_config.front_app_config.api_key
 }
+
+# Grant Cloud Run runner permission to access the Firebase Web API Key secret
+resource "google_secret_manager_secret_iam_member" "firebase_api_key_accessor" {
+  secret_id = google_secret_manager_secret.firebase_api_key.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.app_runner.email}"
+  project   = var.project_id
+}
