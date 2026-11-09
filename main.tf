@@ -124,6 +124,7 @@ resource "google_sql_database_instance" "postgres" {
       ipv4_enabled                                  = false # Zero Public IP!
       private_network                               = google_compute_network.vpc.id
       enable_private_path_for_google_cloud_services = true
+      ssl_mode                                      = "ENCRYPTED_ONLY" # Enforce strict TLS in-transit encryption
     }
 
     backup_configuration {
