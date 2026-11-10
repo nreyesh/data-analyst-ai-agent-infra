@@ -255,6 +255,71 @@ resource "google_cloud_run_v2_service" "backend" {
 }
 
 # ==============================================================================
+# 7.1 Cloud Run Job: Database Migration Runner (Alembic inside VPC)
+# ==============================================================================
+resource "google_cloud_run_v2_job" "db_migrate" {
+  name     = "building-analytics-migrate-${var.environment}"
+  location = var.region
+  project  = var.project_id
+
+  template {
+    template {
+      service_account = google_service_account.app_runner.email
+
+      vpc_access {
+        network_interfaces {
+          network    = google_compute_network.vpc.id
+          subnetwork = google_compute_subnetwork.subnet.id
+        }
+        egress = "PRIVATE_RANGES_ONLY"
+      }
+
+      containers {
+        image   = "us-docker.pkg.dev/cloudrun/container/hello"
+        command = ["alembic", "upgrade", "head"]
+
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "512Mi"
+          }
+        }
+
+        env {
+          name  = "ENVIRONMENT"
+          value = var.environment
+        }
+        env {
+          name  = "STORAGE_BUCKET"
+          value = google_storage_bucket.app_data.name
+        }
+        env {
+          name  = "DB_HOST"
+          value = google_sql_database_instance.postgres.private_ip_address
+        }
+        env {
+          name  = "DB_NAME"
+          value = google_sql_database.app_db.name
+        }
+        env {
+          name  = "DB_USER"
+          value = google_sql_user.app_user.name
+        }
+        env {
+          name = "DB_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.db_password_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+# ==============================================================================
 # 8. Cloud Run Service 2: Public Frontend (Chat UI / Chainlit)
 # ==============================================================================
 resource "google_cloud_run_v2_service" "frontend" {
