@@ -73,6 +73,19 @@ resource "google_secret_manager_secret" "gemini_api_key_secret" {
   }
 }
 
+# Initial secret version to guarantee 'latest' exists when Cloud Run validates the job
+resource "google_secret_manager_secret_version" "gemini_api_key_val" {
+  secret      = google_secret_manager_secret.gemini_api_key_secret.id
+  secret_data = "initial-placeholder-key"
+
+  lifecycle {
+    ignore_changes = [
+      secret_data,
+    ]
+  }
+}
+
+
 
 # ==============================================================================
 # 4. Networking: Custom VPC, Subnet & Private Service Access
@@ -216,6 +229,12 @@ resource "google_cloud_run_v2_service" "backend" {
   # Ingress restricted to internal / load balancing only (via Frontend or Firebase)
   ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
+  depends_on = [
+    google_secret_manager_secret_version.gemini_api_key_val,
+    google_secret_manager_secret_iam_member.gemini_secret_accessor,
+  ]
+
+
   template {
     service_account = google_service_account.app_runner.email
 
@@ -358,7 +377,13 @@ resource "google_cloud_run_v2_job" "sync_monthly" {
   location = var.region
   project  = var.project_id
 
+  depends_on = [
+    google_secret_manager_secret_version.gemini_api_key_val,
+    google_secret_manager_secret_iam_member.gemini_secret_accessor,
+  ]
+
   template {
+
     task_count  = 1
     parallelism = 1
 
@@ -429,7 +454,7 @@ resource "google_cloud_run_v2_job" "sync_monthly" {
   }
 }
 
-# Cloud Scheduler Trigger: Runs monthly sync at 02:00 AM on the 18th day of every month
+# Cloud Scheduler Trigger: Runs monthly sync at 02:00 AM on the 6th day of every month
 resource "google_cloud_scheduler_job" "monthly_sync_trigger" {
   name             = "building-analytics-monthly-sync-${var.environment}"
   description      = "Trigger automated monthly extraction of building and unit expenses from Kastor"
@@ -439,7 +464,13 @@ resource "google_cloud_scheduler_job" "monthly_sync_trigger" {
   region           = var.region
   attempt_deadline = "320s"
 
+  depends_on = [
+    google_cloud_run_v2_job.sync_monthly,
+  ]
+
+
   http_target {
+
     http_method = "POST"
     uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.sync_monthly.name}:run"
 
