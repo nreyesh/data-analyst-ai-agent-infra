@@ -234,6 +234,14 @@ resource "google_cloud_run_v2_service" "backend" {
     google_secret_manager_secret_iam_member.gemini_secret_accessor,
   ]
 
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      client,
+      client_version,
+    ]
+  }
+
 
   template {
     service_account = google_service_account.app_runner.email
@@ -312,6 +320,14 @@ resource "google_cloud_run_v2_job" "db_migrate" {
   location = var.region
   project  = var.project_id
 
+  lifecycle {
+    ignore_changes = [
+      template[0].template[0].containers[0].image,
+      client,
+      client_version,
+    ]
+  }
+
   template {
     template {
       service_account = google_service_account.app_runner.email
@@ -381,6 +397,14 @@ resource "google_cloud_run_v2_job" "sync_monthly" {
     google_secret_manager_secret_version.gemini_api_key_val,
     google_secret_manager_secret_iam_member.gemini_secret_accessor,
   ]
+
+  lifecycle {
+    ignore_changes = [
+      template[0].template[0].containers[0].image,
+      client,
+      client_version,
+    ]
+  }
 
   template {
 
