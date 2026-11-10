@@ -63,6 +63,17 @@ resource "google_secret_manager_secret_version" "chainlit_secret_val" {
   secret_data = random_password.chainlit_secret.result
 }
 
+# Gemini API Key Secret
+resource "google_secret_manager_secret" "gemini_api_key_secret" {
+  secret_id = "building-analytics-gemini-api-key-${var.environment}"
+  project   = var.project_id
+
+  replication {
+    auto {}
+  }
+}
+
+
 # ==============================================================================
 # 4. Networking: Custom VPC, Subnet & Private Service Access
 # ==============================================================================
@@ -186,6 +197,14 @@ resource "google_secret_manager_secret_iam_member" "chainlit_secret_accessor" {
   project   = var.project_id
 }
 
+resource "google_secret_manager_secret_iam_member" "gemini_secret_accessor" {
+  secret_id = google_secret_manager_secret.gemini_api_key_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.app_runner.email}"
+  project   = var.project_id
+}
+
+
 # ==============================================================================
 # 7. Cloud Run Service 1: Private Backend (Direct VPC Egress to Cloud SQL)
 # ==============================================================================
@@ -250,6 +269,18 @@ resource "google_cloud_run_v2_service" "backend" {
           }
         }
       }
+
+      # Inject Gemini API key directly from Secret Manager at runtime
+      env {
+        name = "GEMINI_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.gemini_api_key_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
+
     }
   }
 }
@@ -318,6 +349,113 @@ resource "google_cloud_run_v2_job" "db_migrate" {
     }
   }
 }
+
+# ==============================================================================
+# 7.2 Cloud Run Job: Automated Monthly & Historical Extraction Pipeline
+# ==============================================================================
+resource "google_cloud_run_v2_job" "sync_monthly" {
+  name     = "building-analytics-sync-${var.environment}"
+  location = var.region
+  project  = var.project_id
+
+  template {
+    task_count  = 1
+    parallelism = 1
+
+    template {
+      service_account = google_service_account.app_runner.email
+      timeout         = "3600s" # 60 minutes max runtime for full condominium cycle
+
+      vpc_access {
+        network_interfaces {
+          network    = google_compute_network.vpc.id
+          subnetwork = google_compute_subnetwork.subnet.id
+        }
+        egress = "PRIVATE_RANGES_ONLY"
+      }
+
+      containers {
+        image   = "us-docker.pkg.dev/cloudrun/container/hello"
+        command = ["python", "-m", "backend.app.extractor.cli"]
+        args    = ["--target", "all", "--current-month"]
+
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "1Gi"
+          }
+        }
+
+        env {
+          name  = "ENVIRONMENT"
+          value = var.environment
+        }
+        env {
+          name  = "STORAGE_BUCKET"
+          value = google_storage_bucket.app_data.name
+        }
+        env {
+          name  = "DB_HOST"
+          value = google_sql_database_instance.postgres.private_ip_address
+        }
+        env {
+          name  = "DB_NAME"
+          value = google_sql_database.app_db.name
+        }
+        env {
+          name  = "DB_USER"
+          value = google_sql_user.app_user.name
+        }
+        env {
+          name = "DB_PASSWORD"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.db_password_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "GEMINI_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.gemini_api_key_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+# Cloud Scheduler Trigger: Runs monthly sync at 02:00 AM on the 18th day of every month
+resource "google_cloud_scheduler_job" "monthly_sync_trigger" {
+  name             = "building-analytics-monthly-sync-${var.environment}"
+  description      = "Trigger automated monthly extraction of building and unit expenses from Kastor"
+  schedule         = "0 2 18 * *"
+  time_zone        = "America/Santiago"
+  project          = var.project_id
+  region           = var.region
+  attempt_deadline = "320s"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${google_cloud_run_v2_job.sync_monthly.name}:run"
+
+    oauth_token {
+      service_account_email = google_service_account.app_runner.email
+    }
+  }
+}
+
+# Allow App Runner SA to invoke Cloud Run jobs (needed by Cloud Scheduler)
+resource "google_project_iam_member" "scheduler_run_invoker" {
+  project = var.project_id
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.app_runner.email}"
+}
+
 
 # ==============================================================================
 # 8. Cloud Run Service 2: Public Frontend (Chat UI / Chainlit)
