@@ -226,8 +226,8 @@ resource "google_cloud_run_v2_service" "backend" {
   location = var.region
   project  = var.project_id
 
-  # Ingress restricted to internal / load balancing only (via Frontend or Firebase)
-  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+  # Ingress configuration: allow web traffic since frontend routes via public domain; backend enforces Firebase/RBAC auth
+  ingress = "INGRESS_TRAFFIC_ALL"
 
   depends_on = [
     google_secret_manager_secret_version.gemini_api_key_val,
@@ -585,6 +585,15 @@ resource "google_cloud_run_v2_service_iam_member" "frontend_public_access" {
   project  = var.project_id
   location = google_cloud_run_v2_service.frontend.location
   name     = google_cloud_run_v2_service.frontend.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# Allow public web access to the backend API (application layer enforces Firebase/RBAC authentication)
+resource "google_cloud_run_v2_service_iam_member" "backend_public_access" {
+  project  = var.project_id
+  location = google_cloud_run_v2_service.backend.location
+  name     = google_cloud_run_v2_service.backend.name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
