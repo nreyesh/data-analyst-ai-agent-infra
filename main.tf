@@ -523,6 +523,14 @@ resource "google_cloud_run_v2_service" "frontend" {
   # Public Ingress so users can access the chat UI in their browser
   ingress = "INGRESS_TRAFFIC_ALL"
 
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image,
+      client,
+      client_version,
+    ]
+  }
+
   template {
     service_account = google_service_account.app_runner.email
 
