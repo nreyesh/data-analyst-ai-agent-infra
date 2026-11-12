@@ -4,6 +4,17 @@ This document captures the architectural decisions, security standards, naming c
 
 ---
 
+## 0. ⛔ Absolute Agent Guardrails (Never Violate)
+
+1. **NO GIT COMMITS OR PUSHES:**
+   * AI agents are **STRICTLY FORBIDDEN** from running `git commit`, `git push`, or modifying git history. Only the human engineer commits and pushes.
+2. **ZERO HARDCODED SECRETS OR STATIC JSON KEYS:**
+   * Never commit service account JSON keys or passwords. Authentication must use Workload Identity Federation, and passwords must be generated dynamically via Secret Manager.
+3. **NEVER EXPOSE PRIVATE INFRASTRUCTURE TO PUBLIC INTERNET:**
+   * Cloud SQL must maintain `ipv4_enabled = false` (Zero Public IP). Backend Cloud Run must remain on internal ingress.
+
+---
+
 ## 1. Repository & Codebase Hierarchy
 
 The project follows a **Modular Git Submodule Multi-Repo Architecture**:

@@ -101,6 +101,28 @@ resource "google_secret_manager_secret_version" "gemini_api_key_val" {
   }
 }
 
+# LangSmith Observability API Key Secret
+resource "google_secret_manager_secret" "langsmith_api_key_secret" {
+  secret_id = "building-analytics-langsmith-api-key-${var.environment}"
+  project   = var.project_id
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "langsmith_api_key_val" {
+  secret      = google_secret_manager_secret.langsmith_api_key_secret.id
+  secret_data = "initial-placeholder-key"
+
+  lifecycle {
+    ignore_changes = [
+      secret_data,
+    ]
+  }
+}
+
+
 
 
 # ==============================================================================
@@ -233,6 +255,14 @@ resource "google_secret_manager_secret_iam_member" "gemini_secret_accessor" {
   project   = var.project_id
 }
 
+resource "google_secret_manager_secret_iam_member" "langsmith_secret_accessor" {
+  secret_id = google_secret_manager_secret.langsmith_api_key_secret.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.app_runner.email}"
+  project   = var.project_id
+}
+
+
 
 # ==============================================================================
 # 7. Cloud Run Service 1: Private Backend (Direct VPC Egress to Cloud SQL)
@@ -248,7 +278,10 @@ resource "google_cloud_run_v2_service" "backend" {
   depends_on = [
     google_secret_manager_secret_version.gemini_api_key_val,
     google_secret_manager_secret_iam_member.gemini_secret_accessor,
+    google_secret_manager_secret_version.langsmith_api_key_val,
+    google_secret_manager_secret_iam_member.langsmith_secret_accessor,
   ]
+
 
   lifecycle {
     ignore_changes = [
@@ -323,6 +356,26 @@ resource "google_cloud_run_v2_service" "backend" {
           }
         }
       }
+
+      # LangSmith Observability & Tracing configuration
+      env {
+        name  = "LANGSMITH_TRACING"
+        value = "true"
+      }
+      env {
+        name  = "LANGSMITH_PROJECT"
+        value = "building-analytics-${var.environment}"
+      }
+      env {
+        name = "LANGSMITH_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.langsmith_api_key_secret.secret_id
+            version = "latest"
+          }
+        }
+      }
+
 
     }
   }
@@ -412,7 +465,10 @@ resource "google_cloud_run_v2_job" "sync_monthly" {
   depends_on = [
     google_secret_manager_secret_version.gemini_api_key_val,
     google_secret_manager_secret_iam_member.gemini_secret_accessor,
+    google_secret_manager_secret_version.langsmith_api_key_val,
+    google_secret_manager_secret_iam_member.langsmith_secret_accessor,
   ]
+
 
   lifecycle {
     ignore_changes = [
