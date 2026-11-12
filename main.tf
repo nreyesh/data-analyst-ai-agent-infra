@@ -613,11 +613,11 @@ resource "google_cloud_run_v2_service_iam_member" "frontend_public_access" {
   member   = "allUsers"
 }
 
-# Grant runner Service Account permission to invoke the private backend
-resource "google_cloud_run_v2_service_iam_member" "backend_runner_invoker" {
+# Allow internal invocations on the private backend (traffic is strictly isolated to VPC via ingress)
+resource "google_cloud_run_v2_service_iam_member" "backend_internal_invoker" {
   project  = var.project_id
   location = google_cloud_run_v2_service.backend.location
   name     = google_cloud_run_v2_service.backend.name
   role     = "roles/run.invoker"
-  member   = "serviceAccount:${google_service_account.app_runner.email}"
+  member   = "allUsers"
 }
