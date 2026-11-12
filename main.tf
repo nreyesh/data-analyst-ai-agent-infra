@@ -226,8 +226,8 @@ resource "google_cloud_run_v2_service" "backend" {
   location = var.region
   project  = var.project_id
 
-  # Ingress configuration: allow web traffic since frontend routes via public domain; backend enforces Firebase/RBAC auth
-  ingress = "INGRESS_TRAFFIC_ALL"
+  # Ingress restricted to internal / load balancing only (via Frontend or internal jobs)
+  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
   depends_on = [
     google_secret_manager_secret_version.gemini_api_key_val,
@@ -526,13 +526,13 @@ resource "google_cloud_run_v2_service" "frontend" {
   template {
     service_account = google_service_account.app_runner.email
 
-    # Direct VPC Egress: Allows the frontend to call the private backend over the VPC
+    # Direct VPC Egress: Routes traffic through VPC with Private Google Access for internal backend
     vpc_access {
       network_interfaces {
         network    = google_compute_network.vpc.id
         subnetwork = google_compute_subnetwork.subnet.id
       }
-      egress = "PRIVATE_RANGES_ONLY"
+      egress = "ALL_TRAFFIC"
     }
 
     containers {
@@ -589,11 +589,11 @@ resource "google_cloud_run_v2_service_iam_member" "frontend_public_access" {
   member   = "allUsers"
 }
 
-# Allow public web access to the backend API (application layer enforces Firebase/RBAC authentication)
-resource "google_cloud_run_v2_service_iam_member" "backend_public_access" {
+# Grant runner Service Account permission to invoke the private backend
+resource "google_cloud_run_v2_service_iam_member" "backend_runner_invoker" {
   project  = var.project_id
   location = google_cloud_run_v2_service.backend.location
   name     = google_cloud_run_v2_service.backend.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  member   = "serviceAccount:${google_service_account.app_runner.email}"
 }
