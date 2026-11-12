@@ -7,6 +7,22 @@ resource "google_artifact_registry_repository" "docker_repo" {
   repository_id = "building-analytics-repo-${var.environment}"
   description   = "Docker repository for Building Analytics services (${var.environment})"
   format        = "DOCKER"
+
+  cleanup_policies {
+    id     = "keep-latest-versions"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 5
+    }
+  }
+
+  cleanup_policies {
+    id     = "delete-older-than-10d"
+    action = "DELETE"
+    condition {
+      older_than = "864000s" # 10 days
+    }
+  }
 }
 
 # ==============================================================================
